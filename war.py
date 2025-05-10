@@ -18,11 +18,9 @@ up being faster. It would be a good idea to keep objects in each of these
 for each game which contain the game's state, for instance things like the
 socket, the cards given, the cards still available, etc.
 """
-Game = namedtuple("Game", ["p1", "p2"])
 
 # Stores the clients waiting to get connected to other clients
 waiting_clients = []
-
 
 class Command(Enum):
     """
@@ -48,15 +46,26 @@ def readexactly(sock, numbytes):
     before numbytes have been received, be sure to account for that here or in
     the caller.
     """
-    # TODO
-    pass
+    result = b''
+    while numbytes > 0:
+        recent_bytes = sock.recv(numbytes)
+        result += recent_bytes
+        if len(recent_bytes) == 0:
+            return -1
+        numbytes -= len(recent_bytes)
+        
+    return result
 
 
 def kill_game(game):
     """
     TODO: If either client sends a bad message, immediately nuke the game.
     """
-    pass
+
+    game.p1_socket.shutdown(socket.SHUT_RDWR)
+    game.p1_socket.close()
+    game.p2_socket.shutdown(socket.SHUT_RDWR)
+    game.p2_socket.close()
 
 
 def compare_cards(card1, card2):
@@ -64,7 +73,12 @@ def compare_cards(card1, card2):
     TODO: Given an integer card representation, return -1 for card1 < card2,
     0 for card1 = card2, and 1 for card1 > card2
     """
-    pass
+    if (card1 - (13 * (card1 // 13))) > (card2 - (13 * (card2 // 13))):
+        return 1
+    elif (card1 - (13 * (card1 // 13))) < (card2 - (13 * (card2 // 13))):
+        return -1
+    else:
+        return 0
     
 
 def deal_cards():
@@ -72,16 +86,98 @@ def deal_cards():
     TODO: Randomize a deck of cards (list of ints 0..51), and return two
     26 card "hands."
     """
-    pass
-    
+    deck1 = list(range(0,52))
+    deck2 = []
+    for i in range(0, 26):
+        picked_card = random.choice(deck1)
+        deck2.append(picked_card)
+        deck1.remove(picked_card)
+        
+    return (deck1, deck2)
 
+def run_game(p1_socket, p2_socket):
+    Game = namedtuple("Game", ["p1_socket", "p2_socket", "p1_hand", "p2_hand", "p1_wins", "p2_wins"])
+    Game.p1_wins = 0
+    Game.p2_wins = 0
+    Game.p1_socket = p1_socket
+    Game.p2_socket = p2_socket
+    # Check for want game
+    want1 = readexactly(Game.p1_socket, 2)
+    want2 = readexactly(Game.p2_socket, 2)
+
+    if want1 == -1 or want2 == -1 or want1[0] != Command.WANTGAME.value or want2[0] != Command.WANTGAME.value:
+        logging.warning("Invalid game want.")
+        kill_game(Game)
+        return
+
+    # Start game
+    Game.p1_hand, Game.p2_hand = deal_cards()
+    Game.p1_socket.sendall(bytes(Command.GAMESTART.value) + bytes(Game.p1_hand))
+    Game.p2_socket.sendall(bytes(Command.GAMESTART.value) + bytes(Game.p2_hand))
+
+    # Run rounds
+
+    for i in range(0, 26):
+        p1_card = readexactly(Game.p1_socket, 2)
+        p2_card = readexactly(Game.p2_socket, 2)
+
+        if p1_card == -1 or p2_card == -1 or p1_card[0] != Command.PLAYCARD.value or p2_card[0] != Command.PLAYCARD.value:
+            logging.warning("Invalid move.")
+            kill_game(Game)
+            return
+
+        comp = compare_cards(p1_card[1], p2_card[1])
+        
+        if comp == -1:
+            p1_res, p2_res = Result.LOSE.value, Result.WIN.value
+            Game.p1_socket.sendall(bytes([Command.PLAYRESULT.value, p1_res]))
+            Game.p2_socket.sendall(bytes([Command.PLAYRESULT.value, p2_res]))
+            Game.p2_wins += 1
+        elif comp == 1:
+            p1_res, p2_res = Result.WIN.value, Result.LOSE.value
+            Game.p1_socket.sendall(bytes([Command.PLAYRESULT.value, p1_res]))
+            Game.p2_socket.sendall(bytes([Command.PLAYRESULT.value, p2_res]))
+            Game.p1_wins += 1
+        else:
+            Game.p1_socket.sendall(bytes([Command.PLAYRESULT.value, Result.DRAW.value]))
+            Game.p2_socket.sendall(bytes([Command.PLAYRESULT.value, Result.DRAW.value]))
+
+    if Game.p1_wins > Game.p2_wins:
+        logging.info("Player 1 has won")
+    elif Game.p1_wins < Game.p2_wins:
+        logging.info("Player 2 has won")
+    else:
+        logging.info("The game was a draw")
+
+    kill_game(Game)
+    
 def serve_game(host, port):
     """
     TODO: Open a socket for listening for new connections on host:port, and
     perform the war protocol to serve a game of war between each client.
     This function should run forever, continually serving clients.
     """
-    pass
+
+    ssocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    ssocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    ssocket.bind((host, port))
+    ssocket.listen(2)
+    logging.info(f"Server listening on: {host}, {port}")
+
+    connected_clients = []
+
+    # Wait for clients to connect
+    while True:
+        client_socket, addr = ssocket.accept()
+        logging.debug(f"Client address: {addr}")
+        connected_clients.append(client_socket)
+        
+        if (len(connected_clients) >= 2):
+            p1_socket = connected_clients.pop(0)
+            p2_socket = connected_clients.pop(0)
+
+            threading.Thread(target=run_game, args=(p1_socket, p2_socket), daemon=True).start()
+
     
 
 async def limit_client(host, port, loop, sem):
