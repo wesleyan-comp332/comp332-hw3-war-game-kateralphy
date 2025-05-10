@@ -141,11 +141,11 @@ def run_game(p1_socket, p2_socket):
             Game.p2_socket.sendall(bytes([Command.PLAYRESULT.value, Result.DRAW.value]))
 
     if Game.p1_wins > Game.p2_wins:
-        logging.info("Player 1")
+        logging.info("Player 1 has won")
     elif Game.p1_wins < Game.p2_wins:
-        logging.info("Player 2")
+        logging.info("Player 2 has won")
     else:
-        logging.info("Tie")
+        logging.info("The game was a draw")
 
     kill_game(Game)
     
@@ -196,7 +196,6 @@ async def client(host, port, loop):
         # send want game
         writer.write(b"\0\0")
         card_msg = await reader.readexactly(27)
-        logging.debug(card_msg[1:])
         myscore = 0
         for card in card_msg[1:]:
             writer.write(bytes([Command.PLAYCARD.value, card]))
