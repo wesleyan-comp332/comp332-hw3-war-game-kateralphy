@@ -18,12 +18,9 @@ up being faster. It would be a good idea to keep objects in each of these
 for each game which contain the game's state, for instance things like the
 socket, the cards given, the cards still available, etc.
 """
-Game = namedtuple("Game", ["p1_socket", "p2_socket", "p1_hand", "p2_hand", "p1_wins", "p2_wins"])
-Game.p1_wins = 0
-Game.p2_wins = 0
+
 # Stores the clients waiting to get connected to other clients
 waiting_clients = []
-
 
 class Command(Enum):
     """
@@ -99,7 +96,12 @@ def deal_cards():
     return (deck1, deck2)
 
 def run_game(p1_socket, p2_socket):
-# Check for want game
+    Game = namedtuple("Game", ["p1_socket", "p2_socket", "p1_hand", "p2_hand", "p1_wins", "p2_wins"])
+    Game.p1_wins = 0
+    Game.p2_wins = 0
+    Game.p1_socket = p1_socket
+    Game.p2_socket = p2_socket
+    # Check for want game
     want1 = readexactly(Game.p1_socket, 2)
     want2 = readexactly(Game.p2_socket, 2)
 
@@ -171,10 +173,10 @@ def serve_game(host, port):
         connected_clients.append(client_socket)
         
         if (len(connected_clients) >= 2):
-            Game.p1_socket = connected_clients.pop(0)
-            Game.p2_socket = connected_clients.pop(0)
-            
-            threading.Thread(target=run_game, args=(Game.p1_socket, Game.p2_socket), daemon=True).start()
+            p1_socket = connected_clients.pop(0)
+            p2_socket = connected_clients.pop(0)
+
+            threading.Thread(target=run_game, args=(p1_socket, p2_socket), daemon=True).start()
 
     
 
